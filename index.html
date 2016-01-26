@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Tampereen auraustiedot</title>
+</head>
+<body>
+
+<script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+<script>
+$.getJSON('https://kunto.softroi.fi/KuntoTampere/v1/snowplow/', function(data) 
+{
+	console.log(data);
+});
+</script>
+</body>
+</html>
