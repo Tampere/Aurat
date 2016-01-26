@@ -1,17 +1,257 @@
-<!DOCTYPE html>
-<html lang="en">
+<!Doctype html>
+<html>
 <head>
-	<meta charset="UTF-8">
-	<title>Tampereen auraustiedot</title>
+	<title>Tampereen aurausdata</title>
+	<link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet/v0.7.7/leaflet.css" />
+	<style>
+		body, html
+		{
+			margin: 0; padding: 0;
+		}
+
+		#map
+		{
+			height: 100%;
+			width: 100%;
+			left: 0;
+			top: 0;
+			position: absolute;
+		}
+	</style>
 </head>
 <body>
 
+<div id="map">
+	
+</div>
+
 <script src="https://code.jquery.com/jquery-2.2.0.min.js"></script>
+<script src="http://cdn.leafletjs.com/leaflet/v0.7.7/leaflet.js"></script>
+<script src="http://underscorejs.org/underscore-min.js"></script>
 <script>
-$.getJSON('https://kunto.softroi.fi/KuntoTampere/v1/snowplow/', function(data) 
+
+//
+// Tampereen auraustiedot kartalla
+// Antti Sand <antti.sand@tampere.fi>
+// 
+// Perustuu (isoin) osin Helsingin kaupungin auraustietoesitykseen:
+// https://github.com/City-of-Helsinki/aura
+// 
+// Karttatekniikka: OpenStreetMap, karttakuvat: Mapbox
+// Aurausdata: https://kunto.softroi.fi/KuntoTampere/v1/snowplow
+//
+
+var map = L.map('map').setView([61.497809, 23.761365], 13);
+
+L.tileLayer('https://api.tiles.mapbox.com/v4/{id}/{z}/{x}/{y}.png?access_token={accessToken}', {
+    attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, <a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery &copy; <a href="http://mapbox.com">Mapbox</a>',
+    maxZoom: 18,
+    id: 'anttisan.p044idn9',
+    accessToken: 'pk.eyJ1IjoiYW50dGlzYW4iLCJhIjoiY2lqdmF0enhlMDRwYXczbTNtdWc5ZG1yeSJ9.cLDTcriEquyYqkIsT27LAA'
+}).addTo(map);
+
+var plows = {};
+
+var addPlow = function(plow)
 {
-	console.log(data);
-});
+	var marker, loc;
+	loc = plow.last_location.coords; // Koordinaatit tulevat rajapinnasta muodossa "(x y)". Miksipä ei..
+	var latlngstr = loc.substring(1, loc.length - 1);
+	var coords = latlngstr.split(" ");
+	marker = L.marker([coords[1], coords[0]]);
+	marker.addTo(map);
+	marker.plow = plow;
+	plow.marker = marker;
+	marker.on('click', function(e)
+	{
+		plow = e.target.plow;
+		if(plow.trail)
+		{
+			map.removeLayer(plow.trail);
+			return plow.trail = null;
+		}
+		else
+		{
+			return showPlowTrail(e.target.plow);
+		}
+	});
+
+	return plows[plow.id] = plow;
+};
+
+var showPlowTrail = function(plow)
+{
+	return $.getJSON('proxy.php?url=https://kunto.softroi.fi/KuntoTampere/v1/snowplow/' +   plow.id + '?history=500', function(data) 
+	{
+		var i, last_latlng, latlng, len, line, lines, p, plow_id, pnt, ref;
+		
+		for(plow_id in plows)
+		{
+			p = plows[plow_id];
+			if(!p.trail)
+			{
+				continue;
+			}
+			map.removeLayer(p.trail);
+			p.trail = null;
+		}
+
+		line = [];
+		lines = [line];
+		last_latlng = null;
+		ref = data.contents.location_history;
+		if(ref === undefined)
+		{
+			plow.marker.bindPopup("<b>Ei tietoa</b><br>Ei aiempia sijainteja tiedossa.").openPopup();
+			return;
+		}
+		
+		var type = (plow.machine_type === undefined) ? "Tuntematon" : plow.machine_type;
+		plow.marker.bindPopup("<b>Aura:</b>" + plow.id + "<br>" + translateAction(plow) + "<br>" + type).openPopup();
+
+		for(i = 0, len = ref.length; i < len; i++)
+		{
+			pnt = ref[i];
+			var latlngstr = pnt.coords.substring(1, pnt.coords.length - 1);
+			var coords = latlngstr.split(" ");
+			latlng = new L.LatLng(coords[1], coords[0]);
+			if(last_latlng && latlng.distanceTo(last_latlng) > 200)
+			{
+				line = [latlng];
+				lines.push(line);
+			}
+			else
+			{
+				line.push(latlng);
+			}
+		
+			last_latlng = latlng;
+		}
+
+		line = L.multiPolyline(lines, {color: actionColor(plow.last_location.events[0])});
+		line.addTo(map);
+		return plow.trail = line;
+	});
+};
+
+var actionColor = function(event)
+{
+	var color;
+
+	switch(event)
+	{
+		case 'au':
+		color = '#6633FF';
+		break;
+
+		case 'su':
+		color = '#9900FF';
+		break;
+
+		case 'hi':
+		color = '#663300';
+		break;
+
+		case 'hp':
+		color = '#666633';
+		break;
+
+		case 'pj':
+		color = '#CC0033';
+		break;
+
+		default:
+		color = '#330033';
+		break;
+	};
+
+	return color;
+};
+
+var translateAction = function(plow)
+{
+	var action;
+
+	switch(plow.last_location.events[0])
+	{
+		case 'au':
+		action = 'Lumen auraus';
+		break;
+
+		case 'su':
+		action = 'Liuossuolaus';
+		break;
+
+		case 'hi':
+		action = 'Liukkauden torjunta';
+		break;
+
+		case 'hp':
+		action = 'Hiekoitushiekan poisto';
+		break;
+
+		case 'pj':
+		action = 'Polanteen poistso';
+		break;
+
+		default:
+		action = plow.last_location.events[0];
+		break;
+	};
+
+	return action;
+};
+
+var resetPlows = function()
+{
+	var plow, plow_id;
+	for(plow_id in plows)
+	{
+		plow = plows[plow_id];
+		map.removeLayer(plow.marker);
+		plow.marker = null;
+	}
+
+	return plows = {};
+};
+
+var refreshPlows = function(reset)
+{
+	var i, len;
+	return $.getJSON('proxy.php?url=https://kunto.softroi.fi/KuntoTampere/v1/snowplow/', function(data) 
+	{
+		if(reset)
+		{
+			resetPlows();
+		}
+
+		var results = [];
+
+		for(i = 0, len = data.contents.length; i < len; i++)
+		{
+			var plow_info = data.contents[i];
+			if(!(plow_info.id in plows))
+			{
+				var plow = addPlow(plow_info);
+			}
+			var plow = plows[plow_info.id];
+			var marker = plow.marker;
+			if(plow.last_location.timestamp !== plow_info.last_location.timestamp)
+			{
+				var old_ll = marker.getLatLng();
+				var coords = plow_info.last_location.coords;
+				var new_ll = new L.LatLng(coords[1], coords[0]);
+				marker.setLatLng(new_ll);
+				plow.last_location = plow_info.last_location;
+			}
+		}
+
+		return results;
+	});
+};
+
+refreshPlows();
+
+// TODO: Tietojen päivittäminen, setTimeout(refreshPlows, 10000);
 </script>
-</body>
 </html>
